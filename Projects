@@ -690,3 +690,6 @@ sudo chown -R ec2-user:ec2-user /home/ec2-user/apache-tomcat-9.0.98/webapps
 sudo chmod -R u+w /home/ec2-user/apache-tomcat-9.0.98/webapps
 =============================================================================================================================================================================
 
+Including sonarqube in pipelines
+
+
