@@ -194,8 +194,30 @@ pipeline {
     }
 }
 
+click on pipeline syntax
+sample step:-checkout:check out from version control
+SCM:- Git
+Repository URL:-copy giturl and paste
+branch:-*/main
+click on generate pipeline script
+
+copy the line and paste it pipeline
+
+Before saving the job, goto General ----> 'Check' This project is parameterized ----> Choice Parameter ----> Name: action ----> Choices: 
+apply
+destroy (Make sure to write these in two lines) ----> Apply ----> Save ----> Build With Parameters ----> It will ask you to apply or destroy, select 'apply'  ----> Build
 
 
+Once the job is built successfully, goto EKS in AWS ----> You will see the cluster ----> Open cluster ----> 'Resources' tab. Verify things ----> 'Add-ons' tab. Verify things ----> 'Compute' tab. Verify things.
+This means we have successfully created the K8S Cluster
+
+To interact with K8S Cluster;
+Open VS Code Editor ----> Make sure to configure AWS Access and Secret keys ----> Execute the below command ----> 
+aws eks update-kubeconfig --region us-east-1 --name <ClusterName> ----> To create a pod ----> kubectl run nginx --image=nginx ----> You can see the pod got created with the name 'nginx' ----> kubectl get pods ----> You will see the 'nginx' pod
+
+To destroy everything created ----> Open Jenkins job ----> Click on 'Build with parameters' ----> Select 'Destroy' ----> Build
+
+Terminate the instance also after destroying
 
 
 
