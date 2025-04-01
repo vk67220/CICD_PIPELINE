@@ -1,0 +1,201 @@
+Steps to perform 
+Launch VM
+Installations in VM
+    --java and jenkins installations
+    --Terraform installation
+    --k8s installation
+    --Aws CLI installation
+IAM User creation
+Writing .tf files
+creation of jenkins pipeline
+verification of EKS cluster
+
+Creation of EC2 instance
+
+Step 1: Launching an EC2 Instance and Installation of Required Tools
+=======================================================
+1.1 Launch VM - Ubuntu 22.04, t2.medium
+
+1.2 Tools Installation
+
+Java and Jenkins Installation Commands
+---------------------------------------------------------
+#!/bin/bash
+sudo apt update -y
+wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | sudo tee /etc/apt/keyrings/adoptium.asc
+echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | sudo tee /etc/apt/sources.list.d/adoptium.list
+sudo apt update -y
+sudo apt install temurin-17-jdk -y
+/usr/bin/java --version
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+sudo apt-get update -y
+sudo apt-get install jenkins -y
+sudo systemctl start jenkins
+sudo systemctl status jenkins
+
+Inorder to access jenkins 
+port no-8080 open security groups 
+publicip:8080 on browser
+install selected plugins
+username
+password
+confirm password 
+email
+save and continue
+save and finish
+
+Terraform Installation
+---------------------------------------------------------
+#!/bin/bash
+sudo apt-get update && sudo apt-get install -y gnupg software-properties-common
+wget -O- https://apt.releases.hashicorp.com/gpg | \
+gpg --dearmor | \
+sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+gpg --no-default-keyring \
+--keyring /usr/share/keyrings/hashicorp-archive-keyring.gpg \
+--fingerprint
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
+sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update
+sudo apt-get install terraform -y
+
+K8S Installation
+---------------------------------------------------------
+#!/bin/bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl 
+
+AWS CLI Installation
+---------------------------------------------------------
+#!/bin/bash
+sudo apt install unzip -y
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+Step 2: Creation of IAM User and Generation of Secret Keys
+=======================================================
+Create IAM User - Generate Access and Secret Keys to Configuration
+click on users
+click create user
+enter username EKS-Kastro
+click on check box provide user access to the aws management console-optional
+click on i want to create IAM user
+custom password
+uncheck user must create a new password at next sign-in
+click on next
+click on attach policies directly
+click on administrator access
+click on user name
+click on security credentials
+click on create access key
+click on CLI
+click on check box 
+clcik on next
+click on create access key
+copy access key and secret access key
+
+Step 3: Jenkins Setup and Configuration 
+=======================================================
+Install Pipeline Stage View plugin
+
+click on manage jenkins
+click on plugins
+click on available plugins
+select Pipeline Stage View and install
+go back to the top page
+
+Configure the access and secret keys in Jenkins
+click on manage jenkins
+click on credentials
+click on global 
+click on add credentials
+kind:-click secret text
+click on scope-global
+secret:-paste access key
+id:-AWS_Access_Key
+description is same as id
+click on create
+
+click on add credentials
+click on secret text
+scope:-global
+secret:-paste secret access key
+id:-AWS_Secret_Key
+description is same as id
+click on create
+
+Step 4: Writing Terraform Files 
+=======================================================
+<Refer the GitHub Repo for the Terraform Files>
+Repo URL: https://github.com/KastroVKiran/Jenkins-Terraform-EKS.git
+
+Step 5: Creation of Jenkins Pipeline for Automating EKS Cluster Creation using Terraform
+====================================================================
+Create Pipeline Job
+
+Pipeline Script;
+pipeline {
+    agent any
+    environment {
+        AWS_ACCESS_KEY_ID = credentials('AWS_Access_Key')
+        AWS_SECRET_ACCESS_KEY = credentials('AWS_Secret_Key')
+        AWS_DEFAULT_REGION = 'ap-south-1'
+    }
+    stages{
+        stage('Clone the Code'){
+            steps{
+                script{
+                    checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/KastroVKiran/Jenkins-Terraform-EKS.git']])
+                }
+            }
+        }
+        stage('Terraform Initialization'){
+            steps{
+                script{
+                    dir('terraform'){
+                         sh 'terraform init'
+                    }
+                }
+            }
+        }
+        stage('Terraform Validation'){
+            steps{
+                script{
+                    dir('terraform'){
+                         sh 'terraform validate'
+                    }
+                }
+            }
+        }
+        stage('Infrastructure Checks'){
+            steps{
+                script{
+                    dir('terraform'){
+                         sh 'terraform plan'
+                    }
+                    input(message: "Approve?", ok: "proceed")
+                }
+            }
+        }
+        stage('Create/Destroy EKS cluster'){
+            steps{
+                script{
+                    dir('terraform'){
+                         sh 'terraform $action --auto-approve'
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
