@@ -485,3 +485,73 @@ pipeline {
 
 
 
+
+Another project using docker-compose integrating application with database
+
+pipeline {
+    agent any
+
+    tools {
+        maven 'maven3'
+        jdk 'jdk17'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/vk67220/ecomm_products_api.git'
+            }
+        }
+
+        stage('Compile') {
+            steps {
+                sh "mvn compile"
+            }
+        }
+
+        stage('Sonar Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh "$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Kastro04 -Dsonar.projectKey=KastroKey -Dsonar.java.binaries=target"
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests"
+            }
+        }
+
+        stage('Clean and Deploy') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'settings.xml', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh 'mvn clean deploy -DskipTests'
+                }
+            }
+        }
+
+        stage('Docker Compose Up') {
+            steps {
+                script {
+                    // Start all services using docker-compose
+                    sh 'docker-compose -f docker-compose.yml up -d'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up workspace...'
+            cleanWs()
+        }
+    }
+}
+
+
+
