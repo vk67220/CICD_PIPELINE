@@ -1310,4 +1310,24 @@ pipeline{
     }
 }
 
+OWASP:-Open Worldwide Application Security Project
 
+Scan your project dependencies
+
+Detect known vulnerabilities (CVEs) in those dependencies
+
+Generate reports (XML, HTML, JSON)
+
+Trivy:-
+
+It's used to find vulnerabilities, secrets, and misconfigurations in:
+
+Containers / Docker images
+
+File systems (source code, directories)
+
+Git repositories
+
+Kubernetes clusters
+
+Infrastructure as Code (IaC) like Terraform, Dockerfiles
