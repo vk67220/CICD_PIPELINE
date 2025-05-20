@@ -852,3 +852,142 @@ pipeline {
         }
     }
 }
+
+Another example with grafana and prometheus
+
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git 'https://github.com/vk67220/springboot-thymeleaf-crud-pagination-sorting-webapp.git'
+            }
+        }
+
+        stage('Build Project') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=springboot-app \
+                        -Dsonar.projectKey=springboot-app \
+                        -Dsonar.java.binaries=target/classes'''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                }
+            }
+        }
+
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh 'docker build -t prasad5806/springboot-thymeleaf-crud-web-app .'
+                        sh 'docker tag prasad5806/springboot-thymeleaf-crud-web-app prasad5806/springboot-thymeleaf-crud-web-app:latest'
+                        sh 'docker push prasad5806/springboot-thymeleaf-crud-web-app:latest'
+                    }
+                }
+            }
+        }
+
+        stage('TRIVY Image Scan') {
+            steps {
+                sh 'trivy image prasad5806/springboot-thymeleaf-crud-web-app:latest > trivy.txt'
+            }
+        }
+
+        stage('Docker Scout Image Scan') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh 'docker-scout quickview prasad5806/springboot-thymeleaf-crud-web-app:latest'
+                        sh 'docker-scout cves prasad5806/springboot-thymeleaf-crud-web-app:latest'
+                        sh 'docker-scout recommendations prasad5806/springboot-thymeleaf-crud-web-app:latest'
+                    }
+                }
+            }
+        }
+
+        stage('Deploy using Docker Compose') {
+            steps {
+                script {
+                    sh 'docker-compose -f docker-compose.yml down || true'
+                    sh 'docker-compose -f docker-compose.yml up -d'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                try {
+                    // Confirm files exist
+                    sh 'ls -l trivy.txt || echo "trivy.txt not found"'
+                    sh 'ls -l trivyfs.txt || echo "trivyfs.txt not found"'
+
+                    emailext(
+                        to: 'varaprasadkasturi.dba@gmail.com',
+                        subject: "Build Status: ${currentBuild.result ?: 'SUCCESS'} - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        body: """
+                            <html>
+                                <body>
+                                    <h2 style="color: #333;">Jenkins Build Notification</h2>
+                                    <p><b>Project:</b> ${env.JOB_NAME}</p>
+                                    <p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
+                                    <p><b>Status:</b> ${currentBuild.result}</p>
+                                    <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                                </body>
+                            </html>
+                        """,
+                        mimeType: 'text/html',
+                        attachLog: true,
+                        attachmentsPattern: 'trivy.txt, trivyfs.txt'
+                    )
+                } catch (e) {
+                    echo "Email sending failed: ${e.getMessage()}"
+                }
+            }
+        }
+    }
+}
