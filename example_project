@@ -1413,3 +1413,216 @@ pipeline {
         }
     }
 }
+
+
+
+Prometheus metrics for all nodes 
+
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        DOCKER_IMAGE = 'prasad5806/springboot-thymeleaf-crud-web-app:latest'
+        EKS_CLUSTER_NAME = 'kastro-eks'
+        AWS_REGION = 'us-east-2'
+    }
+
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git 'https://github.com/vk67220/springboot-thymeleaf-crud-pagination-sorting-webapp.git'
+            }
+        }
+
+        stage('Build Project') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=springboot-app \
+                        -Dsonar.projectKey=springboot-app \
+                        -Dsonar.java.binaries=target/classes
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                }
+            }
+        }
+
+        stage('OWASP FS Scan') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        stage('Trivy FS Scan') {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh '''
+                            echo "Building Docker image..."
+                            docker build -t $DOCKER_IMAGE .
+                            echo "Pushing Docker image..."
+                            docker push $DOCKER_IMAGE
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh 'trivy image $DOCKER_IMAGE > trivy.txt'
+            }
+        }
+
+        // Optional: Uncomment if using Docker Scout
+        /*
+        stage('Docker Scout Image Scan') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh '''
+                            docker-scout quickview $DOCKER_IMAGE
+                            docker-scout cves $DOCKER_IMAGE
+                            docker-scout recommendations $DOCKER_IMAGE
+                        '''
+                    }
+                }
+            }
+        }
+        */
+
+        stage('Deploy using Docker Compose') {
+            steps {
+                script {
+                    sh 'docker-compose -f docker-compose.yml down || true'
+                    sh 'docker-compose -f docker-compose.yml up -d'
+                }
+            }
+        }
+
+        stage('Deploy to EKS Cluster') {
+            steps {
+                script {
+                    sh '''
+                        echo "Verifying AWS credentials..."
+                        aws sts get-caller-identity --output json
+
+                        echo "Configuring kubectl for EKS cluster..."
+                        aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+
+                        echo "Verifying kubeconfig..."
+                        kubectl config view
+
+                        echo "Deploying application to EKS..."
+                        kubectl apply -f deployment.yml
+                        kubectl apply -f service.yml
+                        
+                        kubectl get namespace prometheus-node-exporter || kubectl create namespace prometheus-node-exporter
+                        kubectl apply -f node-service.yml
+                        kubectl apply -f node-exporter-daemonset.yml
+                        
+
+                        echo "Verifying deployment..."
+                        kubectl get pods
+                        kubectl get svc
+                        kubectl get pods -n prometheus-node-exporter
+                        kubectl get svc -n prometheus-node-exporter
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                try {
+                    sh 'ls -l trivy.txt || echo "trivy.txt not found"'
+                    sh 'ls -l trivyfs.txt || echo "trivyfs.txt not found"'
+
+                    emailext(
+                        to: 'varaprasadkasturi.dba@gmail.com',
+                        subject: "[Jenkins] Build ${currentBuild.result ?: 'SUCCESS'}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        body: """
+                            <html>
+                                <body>
+                                    <h2>Jenkins Build Notification</h2>
+                                    <p><b>Project:</b> ${env.JOB_NAME}</p>
+                                    <p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
+                                    <p><b>Status:</b> ${currentBuild.result}</p>
+                                    <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                                </body>
+                            </html>
+                        """,
+                        mimeType: 'text/html',
+                        attachLog: true,
+                        attachmentsPattern: 'trivy.txt, trivyfs.txt'
+                    )
+                } catch (e) {
+                    echo "Email sending failed: ${e.getMessage()}"
+                }
+            }
+        }
+    }
+}
+
+include node-exporter-daemonset.yml it is used to get all node information
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: prometheus-node-exporter
+  labels:
+    app: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      containers:
+      - name: node-exporter
+        image: quay.io/prometheus/node-exporter:latest
+        ports:
+        - containerPort: 9100
+        resources:
+          limits:
+            memory: "100Mi"
+            cpu: "100m"
